@@ -1,8 +1,7 @@
 #!@PYTHON@ -tt
 # ------------------------------------------------------------------------
-# Description: Resource Agent to move a IBM Cloud VIP based on Custom Route
-#              Next-hop Change from one virtual network interface (VNI) to
-#              the Second virtual network interface (VNI) and update public address range
+# Description: Resource Agent to move a IBM Cloud Public Address Range (PAR)
+#              from one availability zone to another
 #
 # Authors:      Eran Gampel
 #
@@ -63,7 +62,7 @@ def ip_address_validator(ip):
         ip (string): ip address
 
     Returns:
-        bool: true if the strig is a valid ipv4 ip address
+        bool: true if the string is a valid ipv4 ip address
     """
     try:
         ipaddress.ip_address(ip)
@@ -78,21 +77,21 @@ def validate_all_action(
     address_prefix_range_id="",
     api_key="",
 ):
-    """validate all paramters
+    """validate all parameters
 
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
-        ext_ip_1 (str, mandatory): First Instance IP.
-        ext_ip_2 (str, mandatory): Second Instance IP.
+        ext_ip_1 (str, optional): First Instance IP. Required for next-hop validation.
+        ext_ip_2 (str, optional): Second Instance IP. Required for next-hop validation.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
     Returns:
         _type_: _description_
     """
-    if not ip_address_validator(ext_ip_1):
+    if ext_ip_1 and not ip_address_validator(ext_ip_1):
         return ocf.OCF_ERR_CONFIGURED
-    if not ip_address_validator(ext_ip_2):
+    if ext_ip_2 and not ip_address_validator(ext_ip_2):
         return ocf.OCF_ERR_CONFIGURED
     if not address_prefix_range_id:
         ocf.logger.error("address_prefix_range_id is required")
@@ -107,7 +106,7 @@ def stop_action(
     address_prefix_range_id="",
     api_key="",
 ):
-    """Stop VIP
+    """Stop public address range failover
 
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
@@ -138,9 +137,9 @@ def start_action(
     address_prefix_range_id="",
     api_key="",
 ):
-    """start_action: redirect  the service ip and update public address range.
+    """start_action: update the public address range target zone.
     Args:
-        vpc_url (str, mandatory): vpc_url for the region .
+        vpc_url (str, mandatory): vpc_url for the region.
         ext_ip_1 (str, mandatory): First Instance IP.
         ext_ip_2 (str, mandatory): Second Instance IP.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
@@ -171,11 +170,11 @@ def monitor_action(
     address_prefix_range_id="",
     api_key="",
 ):
-    """monitor_action: check if service ip and gateway are responding."""
+    """monitor_action: check if next-hop is pointing to this VSI and public address range is in correct zone."""
 
     ocf.logger.debug("monitor_action:")
     try:
-        # First check if the next-hop is pointing to this VM
+        # First check if the next-hop is pointing to this VSI
         active_ip = ibm_cloud_fail_over.fail_over_cr_vip("GET", vpc_url, ext_ip_1,
             ext_ip_2, api_key)
         if not ip_address_validator(active_ip):
@@ -183,7 +182,7 @@ def monitor_action(
             return ocf.OCF_NOT_RUNNING
             
         if not os_ip(active_ip):
-            ocf.logger.warning(f"Active IP {active_ip} is not on this VM")
+            ocf.logger.warning(f"Active IP {active_ip} is not on this VSI")
             return ocf.OCF_NOT_RUNNING
 
         # If next-hop is correct, then check public address range zone compatibility
@@ -210,20 +209,20 @@ def main():
     """Instantiate the resource agent."""
 
     agent_description = textwrap.dedent("""\
-        Resource Agent to move a IBM Cloud VIP based on Custom Route and update public address range.
-        This agent combines the functionality of CR VIP failover with public address range updates.
+        Resource Agent to move a IBM Cloud Public Address Range (PAR) from one availability zone to another.
+        This agent manages the public address range zone updates during failover operations.
         The prerequisites for the use of this resource agent are as follows:
 
         1. A two-node (VSI or BM) cluster distributed in same Availability zone or across.
         2. Enable Instance Metadata enabled on the two nodes
-        3. allow_ip_spoofing enabled on the Virtual network interface
-        4. IBM Cloud API Key or Trusted profile
-        5. A public address range configured in IBM Cloud VPC
+        3. IBM Cloud API Key or Trusted profile
+        4. A public address range configured in IBM Cloud VPC
+        5. Custom Route VIP configured and working
     """)
 
     agent = ocf.Agent(
-        "ibm-cloud-vpc-par-vip",
-        shortdesc="Manages IBM Cloud VIP and public address range failover",
+        "ibm-cloud-vpc-par",
+        shortdesc="Manages IBM Cloud Public Address Range failover",
         longdesc=agent_description
     )
 
@@ -237,16 +236,16 @@ def main():
 
     agent.add_parameter(
         "ext_ip_1",
-        shortdesc="Ip address for first instance.",
-        longdesc="predefined private ip address for first instance.",
+        shortdesc="IP address for first instance",
+        longdesc="Predefined private IP address for first instance",
         content_type="string",
         required=True,
     )
 
     agent.add_parameter(
         "ext_ip_2",
-        shortdesc="Ip address for second instance.",
-        longdesc="predefined private ip address for second instance.",
+        shortdesc="IP address for second instance",
+        longdesc="Predefined private IP address for second instance",
         content_type="string",
         required=True,
     )
@@ -264,7 +263,7 @@ def main():
         shortdesc="API Key or @API_KEY_FILE_PATH",
         longdesc=(
             "API Key or @API_KEY_FILE_PATH for IBM Cloud access. "
-            "The API key content or the path of an API key file that is indicated by the @ symbol."
+            "The API key content or the path of an API key file that is indicated by the @ symbol. "
             "Not needed if trusted profile is used"
         ),
         content_type="string",
