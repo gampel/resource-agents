@@ -5,7 +5,7 @@
 #
 # Authors:      Eran Gampel
 #
-# Copyright (c) 2024 International Business Machines, Inc.
+# Copyright (c) 2025 International Business Machines, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -72,8 +72,6 @@ def ip_address_validator(ip):
 
 def validate_all_action(
     vpc_url="",
-    ext_ip_1="",
-    ext_ip_2="",
     address_prefix_range_id="",
     api_key="",
 ):
@@ -81,18 +79,12 @@ def validate_all_action(
 
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
-        ext_ip_1 (str, optional): First Instance IP. Required for next-hop validation.
-        ext_ip_2 (str, optional): Second Instance IP. Required for next-hop validation.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
     Returns:
         _type_: _description_
     """
-    if ext_ip_1 and not ip_address_validator(ext_ip_1):
-        return ocf.OCF_ERR_CONFIGURED
-    if ext_ip_2 and not ip_address_validator(ext_ip_2):
-        return ocf.OCF_ERR_CONFIGURED
     if not address_prefix_range_id:
         ocf.logger.error("address_prefix_range_id is required")
         return ocf.OCF_ERR_CONFIGURED
@@ -101,8 +93,6 @@ def validate_all_action(
 
 def stop_action(
     vpc_url="",
-    ext_ip_1="",
-    ext_ip_2="",
     address_prefix_range_id="",
     api_key="",
 ):
@@ -110,8 +100,6 @@ def stop_action(
 
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
-        ext_ip_1 (str, mandatory): First Instance IP.
-        ext_ip_2 (str, mandatory): Second Instance IP.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
@@ -119,38 +107,39 @@ def stop_action(
         _type_: _description_
     """
     ocf.logger.info("stop_action: stopping")
-    res = monitor_action(vpc_url, ext_ip_1, ext_ip_2, address_prefix_range_id, api_key)
+    res = monitor_action(vpc_url, address_prefix_range_id, api_key)
     if res == ocf.OCF_NOT_RUNNING:
         ocf.logger.info("Resource is already stopped")
     if res == ocf.OCF_SUCCESS:
         for i in range(0,RETRY_COUNT):
             time.sleep(SLEEP_TIME)
-            res = monitor_action(vpc_url, ext_ip_1, ext_ip_2, address_prefix_range_id, api_key)
+            res = monitor_action(vpc_url, address_prefix_range_id, api_key)
             if res == ocf.OCF_NOT_RUNNING:
                 break
     return ocf.OCF_SUCCESS
 
 def start_action(
     vpc_url="",
-    ext_ip_1="",
-    ext_ip_2="",
     address_prefix_range_id="",
     api_key="",
 ):
     """start_action: update the public address range target zone.
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
-        ext_ip_1 (str, mandatory): First Instance IP.
-        ext_ip_2 (str, mandatory): Second Instance IP.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
-    Change custom route nexthop to point to this endpoint and update public address range.
-    In case of a cross AZ Active Passive the route advertize zone will
-    be changed to the new active zone
+    Updates the public address range target zone to match the VSI's local availability zone.
+    Only updates if this VSI is the active one.
     """
     try:
-        # Then handle the public address range failover
+        # First verify this VSI is active
+        active_fip_id, active_fip_ip = ibm_cloud_fail_over.fail_over_get_attached_fip(api_key)
+        if not active_fip_ip:
+            ocf.logger.error("No active FIP found on this VSI")
+            return ocf.OCF_ERR_GENERIC
+
+        # Then update the public address range
         result = ibm_cloud_fail_over.fail_over_public_address_range(
             range_id=address_prefix_range_id,
             vpc_url=vpc_url,
@@ -165,27 +154,28 @@ def start_action(
 
 def monitor_action(
     vpc_url="",
-    ext_ip_1="",
-    ext_ip_2="",
     address_prefix_range_id="",
     api_key="",
 ):
-    """monitor_action: check if next-hop is pointing to this VSI and public address range is in correct zone."""
+    """monitor_action: check if next-hop for public address range is pointing to this VSI and zone is correct."""
 
     ocf.logger.debug("monitor_action:")
     try:
-        # First check if the next-hop is pointing to this VSI
-        active_ip = ibm_cloud_fail_over.fail_over_cr_vip("GET", vpc_url, ext_ip_1,
-            ext_ip_2, api_key)
-        if not ip_address_validator(active_ip):
-            ocf.logger.warning("Invalid active IP address")
-            return ocf.OCF_NOT_RUNNING
-            
-        if not os_ip(active_ip):
-            ocf.logger.warning(f"Active IP {active_ip} is not on this VSI")
+        # First check if the next-hop for PAR is pointing to this VSI
+        next_hop_ip = ibm_cloud_fail_over.get_next_hop_for_par(
+            range_id=address_prefix_range_id,
+            vpc_url=vpc_url,
+            api_key=api_key
+        )
+        if not next_hop_ip:
+            ocf.logger.warning("No next-hop found for public address range")
             return ocf.OCF_NOT_RUNNING
 
-        # If next-hop is correct, then check public address range zone compatibility
+        if not os_ip(next_hop_ip):
+            ocf.logger.warning(f"Next-hop IP {next_hop_ip} is not on this VSI")
+            return ocf.OCF_NOT_RUNNING
+
+        # Then check public address range zone compatibility
         try:
             zones_match, current_zone = ibm_cloud_fail_over.fail_over_check_par_zone_compatibility(
                 range_id=address_prefix_range_id,
@@ -217,7 +207,7 @@ def main():
         2. Enable Instance Metadata enabled on the two nodes
         3. IBM Cloud API Key or Trusted profile
         4. A public address range configured in IBM Cloud VPC
-        5. Custom Route VIP configured and working
+        5. Floating IP configured and working
     """)
 
     agent = ocf.Agent(
@@ -230,22 +220,6 @@ def main():
         "vpc_url",
         shortdesc="VPC_URL",
         longdesc="IBM Cloud Public VPC URL for your region or a VPE URL for IBM Cloud VPC",
-        content_type="string",
-        required=True,
-    )
-
-    agent.add_parameter(
-        "ext_ip_1",
-        shortdesc="IP address for first instance",
-        longdesc="Predefined private IP address for first instance",
-        content_type="string",
-        required=True,
-    )
-
-    agent.add_parameter(
-        "ext_ip_2",
-        shortdesc="IP address for second instance",
-        longdesc="Predefined private IP address for second instance",
         content_type="string",
         required=True,
     )
