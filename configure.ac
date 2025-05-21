@@ -1040,6 +1040,7 @@ AC_CONFIG_FILES([heartbeat/gcp-vpc-move-vip], [chmod +x heartbeat/gcp-vpc-move-v
 AC_CONFIG_FILES([heartbeat/gcp-vpc-move-route], [chmod +x heartbeat/gcp-vpc-move-route])
 AC_CONFIG_FILES([heartbeat/ibm-cloud-vpc-cr-vip], [chmod +x heartbeat/ibm-cloud-vpc-cr-vip])
 AC_CONFIG_FILES([heartbeat/ibm-cloud-vpc-move-fip], [chmod +x heartbeat/ibm-cloud-vpc-move-fip])
+AC_CONFIG_FILES([heartbeat/ibm-cloud-vpc-move-par], [chmod +x heartbeat/ibm-cloud-vpc-move-par])
 AC_CONFIG_FILES([heartbeat/iSCSILogicalUnit], [chmod +x heartbeat/iSCSILogicalUnit])
 AC_CONFIG_FILES([heartbeat/iSCSITarget], [chmod +x heartbeat/iSCSITarget])
 AC_CONFIG_FILES([heartbeat/jira], [chmod +x heartbeat/jira])
