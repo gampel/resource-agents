@@ -133,13 +133,8 @@ def start_action(
     Only updates if this VSI is the active one.
     """
     try:
-        # First verify this VSI is active
-        active_fip_id, active_fip_ip = ibm_cloud_fail_over.fail_over_get_attached_fip(api_key)
-        if not active_fip_ip:
-            ocf.logger.error("No active FIP found on this VSI")
-            return ocf.OCF_ERR_GENERIC
-
-        # Then update the public address range
+        
+        # update the public address range to point to the active availability zone
         result = ibm_cloud_fail_over.fail_over_public_address_range(
             range_id=address_prefix_range_id,
             vpc_url=vpc_url,
