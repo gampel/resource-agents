@@ -73,6 +73,8 @@ def ip_address_validator(ip):
 def validate_all_action(
     vpc_url="",
     address_prefix_range_id="",
+    nexthop_ip_1="",
+    nexthop_ip_2="",
     api_key="",
 ):
     """validate all parameters
@@ -80,6 +82,8 @@ def validate_all_action(
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
+        nexthop_ip_1 (str, mandatory): First instance IP address to be used as nexthop.
+        nexthop_ip_2 (str, mandatory): Second instance IP address to be used as nexthop.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
     Returns:
@@ -88,12 +92,20 @@ def validate_all_action(
     if not address_prefix_range_id:
         ocf.logger.error("address_prefix_range_id is required")
         return ocf.OCF_ERR_CONFIGURED
+    if not ip_address_validator(nexthop_ip_1):
+        ocf.logger.error("nexthop_ip_1 is not a valid IP address")
+        return ocf.OCF_ERR_CONFIGURED
+    if not ip_address_validator(nexthop_ip_2):
+        ocf.logger.error("nexthop_ip_2 is not a valid IP address")
+        return ocf.OCF_ERR_CONFIGURED
     ocf.logger.debug(f"validate_all_action: {vpc_url} {api_key}")
     return ocf.OCF_SUCCESS
 
 def stop_action(
     vpc_url="",
     address_prefix_range_id="",
+    nexthop_ip_1="",
+    nexthop_ip_2="",
     api_key="",
 ):
     """Stop public address range failover
@@ -101,19 +113,21 @@ def stop_action(
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
+        nexthop_ip_1 (str, mandatory): First instance IP address to be used as nexthop.
+        nexthop_ip_2 (str, mandatory): Second instance IP address to be used as nexthop.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
     Returns:
         _type_: _description_
     """
     ocf.logger.info("stop_action: stopping")
-    res = monitor_action(vpc_url, address_prefix_range_id, api_key)
+    res = monitor_action(vpc_url, address_prefix_range_id, nexthop_ip_1, nexthop_ip_2, api_key)
     if res == ocf.OCF_NOT_RUNNING:
         ocf.logger.info("Resource is already stopped")
     if res == ocf.OCF_SUCCESS:
         for i in range(0,RETRY_COUNT):
             time.sleep(SLEEP_TIME)
-            res = monitor_action(vpc_url, address_prefix_range_id, api_key)
+            res = monitor_action(vpc_url, address_prefix_range_id, nexthop_ip_1, nexthop_ip_2, api_key)
             if res == ocf.OCF_NOT_RUNNING:
                 break
     return ocf.OCF_SUCCESS
@@ -121,23 +135,28 @@ def stop_action(
 def start_action(
     vpc_url="",
     address_prefix_range_id="",
+    nexthop_ip_1="",
+    nexthop_ip_2="",
     api_key="",
 ):
     """start_action: update the public address range target zone.
     Args:
         vpc_url (str, mandatory): vpc_url for the region.
         address_prefix_range_id (str, mandatory): The ID of the public address range to update.
+        nexthop_ip_1 (str, mandatory): First instance IP address to be used as nexthop.
+        nexthop_ip_2 (str, mandatory): Second instance IP address to be used as nexthop.
         api_key (str, optional): IBM Cloud API access key. Defaults to "".
 
     Updates the public address range target zone to match the VSI's local availability zone.
     Only updates if this VSI is the active one.
     """
     try:
-        
         # update the public address range to point to the active availability zone
         result = ibm_cloud_fail_over.fail_over_public_address_range(
             range_id=address_prefix_range_id,
             vpc_url=vpc_url,
+            nexthop_ip_1=nexthop_ip_1,
+            nexthop_ip_2=nexthop_ip_2,
             api_key=api_key
         )
         ocf.logger.info(f"start_action: public address range result: {result}")
@@ -150,9 +169,19 @@ def start_action(
 def monitor_action(
     vpc_url="",
     address_prefix_range_id="",
+    nexthop_ip_1="",
+    nexthop_ip_2="",
     api_key="",
 ):
-    """monitor_action: check if next-hop for public address range is pointing to this VSI and zone is correct."""
+    """monitor_action: check if next-hop for public address range is pointing to this VSI and zone is correct.
+
+    Args:
+        vpc_url (str, mandatory): vpc_url for the region.
+        address_prefix_range_id (str, mandatory): The ID of the public address range to update.
+        nexthop_ip_1 (str, mandatory): First instance IP address to be used as nexthop.
+        nexthop_ip_2 (str, mandatory): Second instance IP address to be used as nexthop.
+        api_key (str, optional): IBM Cloud API access key. Defaults to "".
+    """
 
     ocf.logger.debug("monitor_action:")
     try:
@@ -206,7 +235,7 @@ def main():
     """)
 
     agent = ocf.Agent(
-        "ibm-cloud-vpc-par",
+        "ibm-cloud-vpc-move-par",
         shortdesc="Manages IBM Cloud Public Address Range failover",
         longdesc=agent_description
     )
@@ -223,6 +252,22 @@ def main():
         "address_prefix_range_id",
         shortdesc="Public Address Range ID",
         longdesc="The ID of the public address range to update during failover",
+        content_type="string",
+        required=True,
+    )
+
+     agent.add_parameter(
+        "nexthop_ip_1",
+        shortdesc="Ip address for first instance.",
+        longdesc="predefined private ip address for first instance to be used as nexthop.",
+        content_type="string",
+        required=True,
+    )
+
+    agent.add_parameter(
+        "nexthop_ip_2",
+        shortdesc="Ip address for second instance.",
+        longdesc="predefined private ip address for second instance to be used as nexthop.",
         content_type="string",
         required=True,
     )
