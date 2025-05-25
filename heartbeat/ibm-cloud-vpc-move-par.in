@@ -256,7 +256,7 @@ def main():
         required=True,
     )
 
-     agent.add_parameter(
+    agent.add_parameter(
         "nexthop_ip_1",
         shortdesc="Ip address for first instance.",
         longdesc="predefined private ip address for first instance to be used as nexthop.",
