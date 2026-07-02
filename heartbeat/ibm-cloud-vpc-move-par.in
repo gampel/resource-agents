@@ -3,9 +3,9 @@
 # Description: Resource Agent to move a IBM Cloud Public Address Range (PAR)
 #              from one availability zone to another
 #
-# Authors:      Eran Gampel
+# Authors:      Eran Gampel, Radhakrishnan Balasubramanian
 #
-# Copyright (c) 2025 International Business Machines, Inc.
+# Copyright (c) 2026 International Business Machines, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
