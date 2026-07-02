@@ -539,6 +539,13 @@ if test -z "$PYTHON" || test $BUILD_OCF_PY -eq 0; then
 fi
 AM_CONDITIONAL(BUILD_AZURE_EVENTS_AZ, test $BUILD_AZURE_EVENTS_AZ -eq 1)
 
+BUILD_AZURE_SAP_ZONE=1
+if test -z "$PYTHON" || test $BUILD_OCF_PY -eq 0; then
+    BUILD_AZURE_SAP_ZONE=0
+    AC_MSG_WARN("Not building azure-sap-zone")
+fi
+AM_CONDITIONAL(BUILD_AZURE_SAP_ZONE, test $BUILD_AZURE_SAP_ZONE -eq 1)
+
 BUILD_GCP_PD_MOVE=1
 if test -z "$PYTHON" || test $BUILD_OCF_PY -eq 0; then
     BUILD_GCP_PD_MOVE=0
@@ -559,6 +566,13 @@ if test -z "$PYTHON" || test $BUILD_OCF_PY -eq 0; then
     AC_MSG_WARN("Not building gcp-vpc-move-vip")
 fi
 AM_CONDITIONAL(BUILD_GCP_VPC_MOVE_VIP, test $BUILD_GCP_VPC_MOVE_VIP -eq 1)
+
+BUILD_POWERVS_MOVE_IP=1
+if test -z "$PYTHON" || test $BUILD_OCF_PY -eq 0 || test "x${HAVE_PYMOD_REQUESTS}" != xyes || test "x${HAVE_PYMOD_URLLIB3}" != xyes; then
+    BUILD_POWERVS_MOVE_IP=0
+    AC_MSG_WARN("Not building powervs-move-ip")
+fi
+AM_CONDITIONAL(BUILD_POWERVS_MOVE_IP, test $BUILD_POWERVS_MOVE_IP -eq 1)
 
 BUILD_POWERVS_SUBNET=1
 if test -z "$PYTHON" || test $BUILD_OCF_PY -eq 0 || test "x${HAVE_PYMOD_REQUESTS}" != xyes || test "x${HAVE_PYMOD_URLLIB3}" != xyes; then
@@ -1021,6 +1035,7 @@ rgmanager/Makefile						\
 dnl Files we output that need to be executable
 AC_CONFIG_FILES([heartbeat/azure-events], [chmod +x heartbeat/azure-events])
 AC_CONFIG_FILES([heartbeat/azure-events-az], [chmod +x heartbeat/azure-events-az])
+AC_CONFIG_FILES([heartbeat/azure-sap-zone], [chmod +x heartbeat/azure-sap-zone])
 AC_CONFIG_FILES([heartbeat/AoEtarget], [chmod +x heartbeat/AoEtarget])
 AC_CONFIG_FILES([heartbeat/ManageRAID], [chmod +x heartbeat/ManageRAID])
 AC_CONFIG_FILES([heartbeat/ManageVE], [chmod +x heartbeat/ManageVE])
@@ -1052,6 +1067,7 @@ AC_CONFIG_FILES([heartbeat/mariadb], [chmod +x heartbeat/mariadb])
 AC_CONFIG_FILES([heartbeat/mpathpersist], [chmod +x heartbeat/mpathpersist])
 AC_CONFIG_FILES([heartbeat/nfsnotify], [chmod +x heartbeat/nfsnotify])
 AC_CONFIG_FILES([heartbeat/openstack-info], [chmod +x heartbeat/openstack-info])
+AC_CONFIG_FILES([heartbeat/powervs-move-ip], [chmod +x heartbeat/powervs-move-ip])
 AC_CONFIG_FILES([heartbeat/powervs-subnet], [chmod +x heartbeat/powervs-subnet])
 AC_CONFIG_FILES([heartbeat/rabbitmq-cluster], [chmod +x heartbeat/rabbitmq-cluster])
 AC_CONFIG_FILES([heartbeat/redis], [chmod +x heartbeat/redis])

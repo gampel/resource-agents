@@ -141,6 +141,7 @@ man_MANS                = ocf_heartbeat_AoEtarget.7 \
                           ocf_heartbeat_exportfs.7 \
                           ocf_heartbeat_fio.7 \
                           ocf_heartbeat_galera.7 \
+                          ocf_heartbeat_ganesha-nfs.7 \
                           ocf_heartbeat_garbd.7 \
                           ocf_heartbeat_gcp-ilb.7 \
                           ocf_heartbeat_gcp-vpc-move-ip.7 \
@@ -195,7 +196,6 @@ man_MANS                = ocf_heartbeat_AoEtarget.7 \
                           ocf_heartbeat_rabbitmq-cluster.7 \
                           ocf_heartbeat_rabbitmq-server-ha.7 \
                           ocf_heartbeat_redis.7 \
-                          ocf_heartbeat_rkt.7 \
                           ocf_heartbeat_rsyncd.7 \
                           ocf_heartbeat_rsyslog.7 \
                           ocf_heartbeat_scsi2reservation.7 \
@@ -226,6 +226,10 @@ if BUILD_AZURE_EVENTS_AZ
 man_MANS           	+= ocf_heartbeat_azure-events-az.7
 endif
 
+if BUILD_AZURE_SAP_ZONE
+man_MANS           	+= ocf_heartbeat_azure-sap-zone.7
+endif
+
 if BUILD_GCP_PD_MOVE
 man_MANS           	+= ocf_heartbeat_gcp-pd-move.7
 endif
@@ -236,6 +240,10 @@ endif
 
 if BUILD_GCP_VPC_MOVE_VIP
 man_MANS           	+= ocf_heartbeat_gcp-vpc-move-vip.7
+endif
+
+if BUILD_POWERVS_MOVE_IP
+man_MANS           	+= ocf_heartbeat_powervs-move-ip.7
 endif
 
 if BUILD_POWERVS_SUBNET

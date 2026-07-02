@@ -19,6 +19,12 @@
 #		OCF_RESKEY_run_fsck
 #		OCF_RESKEY_fast_stop
 #		OCF_RESKEY_force_clones
+#		OCF_RESKEY_force_unmount
+#		OCF_RESKEY_term_signals
+#		OCF_RESKEY_kill_signals
+#		OCF_RESKEY_signal_delay
+#	See also the ocf_heartbeat_Filesystem(7) man page.
+
 #
 #OCF_RESKEY_device    : name of block device for the filesystem. e.g. /dev/sda1, /dev/md0
 #                       Or a -U or -L option for mount, or an NFS mount specification
@@ -91,12 +97,6 @@ if is_redhat_based; then
 fi
 
 
-: ${OCF_RESKEY_device=${OCF_RESKEY_device_default}}
-: ${OCF_RESKEY_directory=${OCF_RESKEY_directory_default}}
-: ${OCF_RESKEY_fstype=${OCF_RESKEY_fstype_default}}
-: ${OCF_RESKEY_options=${OCF_RESKEY_options_default}}
-: ${OCF_RESKEY_statusfile_prefix=${OCF_RESKEY_statusfile_prefix_default}}
-: ${OCF_RESKEY_run_fsck=${OCF_RESKEY_run_fsck_default}}
 if [ -z "${OCF_RESKEY_fast_stop}" ]; then
 	case "$OCF_RESKEY_fstype" in
 		gfs2)
@@ -105,11 +105,18 @@ if [ -z "${OCF_RESKEY_fast_stop}" ]; then
 			OCF_RESKEY_fast_stop=${OCF_RESKEY_fast_stop_default};;
 	esac
 fi
-: ${OCF_RESKEY_force_clones=${OCF_RESKEY_force_clones_default}}
-: ${OCF_RESKEY_force_unmount=${OCF_RESKEY_force_unmount_default}}
-: ${OCF_RESKEY_term_signals=${OCF_RESKEY_term_signals_default}}
-: ${OCF_RESKEY_kill_signals=${OCF_RESKEY_kill_signals_default}}
-: ${OCF_RESKEY_signal_delay=${OCF_RESKEY_signal_delay_default}}
+: "fast_stop        ::" ${OCF_RESKEY_fast_stop}
+: "device           ::" ${OCF_RESKEY_device=${OCF_RESKEY_device_default}}
+: "directory        ::" ${OCF_RESKEY_directory=${OCF_RESKEY_directory_default}}
+: "fstype           ::" ${OCF_RESKEY_fstype=${OCF_RESKEY_fstype_default}}
+: "options          ::" ${OCF_RESKEY_options=${OCF_RESKEY_options_default}}
+: "statusfile_prefix::" ${OCF_RESKEY_statusfile_prefix=${OCF_RESKEY_statusfile_prefix_default}}
+: "run_fsck         ::" ${OCF_RESKEY_run_fsck=${OCF_RESKEY_run_fsck_default}}
+: "force_clones     ::" ${OCF_RESKEY_force_clones=${OCF_RESKEY_force_clones_default}}
+: "force_umount     ::" ${OCF_RESKEY_force_unmount=${OCF_RESKEY_force_unmount_default}}
+: "term_signals     ::" ${OCF_RESKEY_term_signals=${OCF_RESKEY_term_signals_default}}
+: "kill_signals     ::" ${OCF_RESKEY_kill_signals=${OCF_RESKEY_kill_signals_default}}
+: "signal_delay     ::" ${OCF_RESKEY_signal_delay=${OCF_RESKEY_signal_delay_default}}
 
 # Variables used by multiple methods
 HOSTOS=$(uname)
@@ -253,7 +260,7 @@ Only set this to "true" if you know what you are doing!
 </parameter>
 
 <parameter name="force_unmount">
-<longdesc lang="en">
+<longdesc lang="en"><![CDATA[
 This option allows specifying how to handle processes that are
 currently accessing the mount directory.
 
@@ -263,11 +270,47 @@ currently accessing the mount directory.
           detection
 "false" : Do not kill any processes.
 
-The 'safe' option uses shell logic to walk the /procs/ directory
+You may add one or more comma separated modifiers
+"[no]move", "[no]xargs", "[no]ps".
+For example:
+
+"true,xargs,nops":
+	find processes using system tools,
+	then kill them "simultaneously" using "xargs kill",
+	do not bother to show process details.
+
+"safe,move,noxargs,ps":
+	move the mount first, then
+	find processes by walking /proc/ "manually", then
+	show process details and kill them individually in a loop.
+
+"safe,move,xargs,ps":
+	move the mount first, then
+	find processes by walking /proc/ "manually", then
+	use "xargs ps" to show process details before
+	using "xargs kill" to get rid of them.
+
+If you have modifiers that contradict each other, the last mentioned wins,
+"ps,nops" results in nops.
+
+The 'safe' option uses shell logic to walk the /proc/<pid>/ directories
 for pids using the mount point while the default option uses the
 fuser cli tool. fuser is known to perform operations that can potentially
 block if unresponsive nfs mounts are in use on the system.
-</longdesc>
+
+If new users of the file system are being spawned continuously by unmanaged 3rd
+party apps, we likely never win the race and the file system will be kept busy.
+Which may result in a timeout and stop failure, potentially escalating to
+hard-reset of this node via fencing.
+
+The 'move' option tries to "mount --move" the mount point somewhere those
+"rogue apps" do not expect it, then proceed to kill current users and attempt
+to umount.
+
+For 'move' to work, you will have to make sure the mount point does not reside
+under a shared mount, for example by mount -o bind,private /mount /mount
+before mounting /mount/point.
+]]></longdesc>
 <shortdesc lang="en">Kill processes before unmount</shortdesc>
 <content type="string" default="${OCF_RESKEY_force_unmount_default}" />
 </parameter>
@@ -582,8 +625,21 @@ Filesystem_start()
 		return $OCF_ERR_CONFIGURED
 	fi
 
+	if $move_before_umount && test -d "$MOVED_CANONICALIZED_MOUNTPOINT"; then
+		CANONICALIZED_MOUNTPOINT=$MOVED_CANONICALIZED_MOUNTPOINT \
+		move_before_umount=false \
+		Filesystem_status
+		rc=$?
+		if [ $rc -ne $OCF_NOT_RUNNING ]; then
+			msg="move_before_umount=$move_before_umount and $MOVED_CANONICALIZED_MOUNTPOINT status is [$rc]"
+			rc=$OCF_ERR_GENERIC
+			ocf_exit_reason "$msg"
+			return $rc
+		fi
+	fi
+
 	# See if the device is already mounted.
-	Filesystem_status
+	move_before_umount=false Filesystem_status
 	case "$?" in
 		$OCF_SUCCESS)
 			ocf_log info "Filesystem $MOUNTPOINT is already mounted."
@@ -663,11 +719,11 @@ get_pids()
 
 	if ocf_is_true  "$FORCE_UNMOUNT"; then
 		if [ "X${HOSTOS}" = "XOpenBSD" ]; then
-			fstat | grep $dir | awk '{print $3}'
+			fstat | grep "$dir" | awk '{print $3}'
 		elif [ "X${HOSTOS}" = "XFreeBSD" ]; then
-			$FUSER -c $dir 2>/dev/null
+			$FUSER -c "$dir" 2>/dev/null
 		else
-			$FUSER -Mm $dir 2>/dev/null
+			$FUSER -Mm "$dir" 2>/dev/null
 		fi
 	elif [ "$FORCE_UNMOUNT" = "safe" ]; then
 		# Yes, in theory, ${dir} could contain "intersting" characters
@@ -680,16 +736,40 @@ get_pids()
 		# -path "/proc/[!0-9]*" -prune -o ...
 		# -path "/proc/[0-9]*" -a ...
 		# the latter seemd to be significantly faster for this one in my naive test.
-		procs=$(exec 2>/dev/null;
-			find /proc -path "/proc/[0-9]*" -type l \( -lname "${dir}/*" -o -lname "${dir}" \) -print |
-			awk -F/ '{print $3}' | uniq)
 
-		# This finds both /proc/<pid>/maps and /proc/<pid>/task/<tid>/maps;
-		# if you don't want the latter, add -maxdepth.
-		mmap_procs=$(exec 2>/dev/null;
-			find /proc -path "/proc/[0-9]*/maps" -print |
-			xargs -r grep -l " ${dir}/" | awk -F/ '{print $3}' | uniq)
-		printf "${procs}\n${mmap_procs}" | sort -u
+		# root, cwd, exe, maps, fd: all per process, not per task ("thread").
+		# -maxdepth to avoid repeatedly scanning the same thing
+		# for all threads of a heavily threaded process.
+		#
+		# Adding -maxdepth reduced scanning from > 16 seconds to < 2 seconds
+		# on a mostly idle system that happened to run a few java processes.
+		#
+		# We can also add a dedicated helper in C do twhat is done below,
+		# which would reduce the scanning time by an
+		# additional factor of 10 again.
+		#
+		# Or trust that fuser (above) learned something in the last 15 years
+		# and avoids blocking operations meanwhile?
+		(
+		# If you want to debug this, drop this redirection.
+		# But it producess too much "No such file" noise for kernel
+		# threads or due to races with exiting processes or closing fds.
+		exec 2>/dev/null;
+		find /proc -mindepth 1 -maxdepth 3 \
+			-path "/proc/[0-9]*" \
+			-type l \( -lname "${dir}/*" -o -lname "${dir}" \) -print |
+		awk -F/ '{print $3}' | uniq
+
+		# If we have "map_files/", "find" above already found the
+		# relevant symlinks, and we don't need to grep "maps" below.
+		# Available since kernel 3.3, respectively 4.3.
+		test -d /proc/$$/map_files ||
+			# memory mappings are also per process, not per task.
+			# This finds only /proc/<pid>/maps, and not /proc/<pid>/task/<tid>/maps;
+			# if you also want the latter, drop -maxdepth.
+			find /proc -mindepth 2 -maxdepth 2 -path "/proc/[0-9]*/maps" -print |
+			xargs -r grep -l " ${dir}/" | awk -F/ '{print $3}' | uniq
+		) | sort -u
 	fi
 }
 
@@ -697,23 +777,60 @@ signal_processes() {
 	local dir=$1
 	local sig=$2
 	local pids pid
+	local nr_pids
+	local sed_script=""
 	# fuser returns a non-zero return code if none of the
 	# specified files is accessed or in case of a fatal
 	# error.
-	pids=$(get_pids "$dir")
-	if [ -z "$pids" ]; then
+	# We don't know whether we have one single line or mutiple lines.
+	# Canonicalize.
+	pids=$(get_pids "$dir" | tr -s ' \t\n' '\n')
+	nr_pids=$(echo "$pids" | grep -c "^.")
+
+	# for many pids, reporting and killing them indivitually just takes too long.
+	# may even be too many words for the shell!
+	#
+	# If the list of pids is too long for a single shell variable,
+	# fix your fork bomb workload, and get a better shell anyways.
+	#
+	if [ $nr_pids -eq 0 ]; then
 		ocf_log info "No processes on $dir were signalled. force_unmount is set to '$FORCE_UNMOUNT'"
 		return 1
 	fi
-	for pid in $pids; do
-		ocf_log info "sending signal $sig to: $(ps -f $pid | tail -1)"
-		kill -s $sig $pid
-	done
+	if $do_xargs_kill; then
+		if $do_ps_f; then
+			# echo "$pids" | xargs -r kill -s STOP
+			echo "sending signal $sig to $nr_pids processes:"
+
+			# According to my man page, 'ps -f "$pid"' might be good enough,
+			# but needs rather specific formatting of that argument.
+			# And 'ps -f $pid' might produce too many words.
+			# Use xargs anyway.
+			echo "$pids" | xargs ps -f 2>&1
+		fi
+		echo "$pids" | xargs -r kill -s $sig 2>&1
+		if ! $do_ps_f; then
+			if [ $nr_pids -gt 24 ]; then
+				sed_script="11 s/^.*/... and more .../; 12,$(( $nr_pids - 10))d"
+				pids=$(echo "$pids" | sed -e "$sed_script" | tr '\n' ' ')
+			fi
+			echo "sent signal $sig to ${nr_pids} processes ["${pids}"]"
+		fi
+	else
+		for pid in $pids; do
+			if $do_ps_f; then
+				echo "sending signal $sig to: $(ps -f $pid | tail -1)"
+			else
+				echo "sending signal $sig to $pid"
+			fi
+			kill -s $sig $pid
+		done
+	fi | ocf_log_pipe info
 	return 0
 }
 try_umount() {
 	local force_arg="$1" SUB="$2"
-	$UMOUNT $force_arg "$SUB"
+	$UMOUNT $force_arg "$SUB" 2>&1 | ocf_log_pipe warn
 	list_mounts | grep "${TAB}${SUB}${TAB}" >/dev/null 2>&1 || {
 		ocf_log info "unmounted $SUB successfully"
 		return $OCF_SUCCESS
@@ -736,13 +853,21 @@ timeout_child() {
 	return $ret
 }
 fs_stop_loop() {
-	local force_arg="$1" SUB="$2" signals="$3" sig send_signal
+	local force_arg="$1" SUB="$2" signals="$3" sig sent_signal
 	while true; do
-		send_signal=false
+		sent_signal=false
 		for sig in $signals; do
-			signal_processes "$SUB" $sig && send_signal=true
+			signal_processes "$SUB" $sig && sent_signal=true
 		done
-		$send_signal && sleep $OCF_RESKEY_signal_delay
+		if $sent_signal; then
+			# Try to umount immediately after signalling, to reduce
+			# the time window in which new users of the file system
+			# may be spawned.
+			try_umount "$force_arg" "$SUB" && return $OCF_SUCCESS
+			sleep $OCF_RESKEY_signal_delay
+		fi
+		# Try to umount after the signal_delay, maybe some processes
+		# needed a moment to "exit cleanly" after receiving SIGTERM.
 		try_umount "$force_arg" "$SUB" && return $OCF_SUCCESS
 	done
 }
@@ -773,16 +898,34 @@ fs_stop() {
 	return $OCF_ERR_GENERIC
 }
 
+try_mount_move()
+{
+	test -d "$MOVED_CANONICALIZED_MOUNTPOINT" || mkdir "$MOVED_CANONICALIZED_MOUNTPOINT" || return
+	mount --move "$CANONICALIZED_MOUNTPOINT" "$MOVED_CANONICALIZED_MOUNTPOINT" || return
+	ocf_log info "Moved $MOUNTPOINT to $MOVED_CANONICALIZED_MOUNTPOINT"
+	return 0
+	# To test really bad timing of "action timeout":
+	# test -e /tmp/fail-after-move && rm -f /tmp/fail-after-move && kill -KILL $$
+}
+
 #
 # STOP: Unmount the filesystem
 #
 Filesystem_stop()
 {
 	# See if the device is currently mounted
-	Filesystem_status >/dev/null 2>&1
+	move_before_umount=false Filesystem_status >/dev/null 2>&1
 	if [ $? -eq $OCF_NOT_RUNNING ]; then
 		# Already unmounted, wonderful.
-		rc=$OCF_SUCCESS
+		# But did we also unmount the moved fs?
+		if $move_before_umount; then
+			CANONICALIZED_MOUNTPOINT=$MOVED_CANONICALIZED_MOUNTPOINT \
+			move_before_umount=false \
+			Filesystem_stop
+			return $?
+		else
+			rc=$OCF_SUCCESS
+		fi
 	else
 		# Wipe the status file, but continue with a warning if
 		# removal fails -- the file system might be read only
@@ -801,6 +944,13 @@ Filesystem_stop()
 		case "$FSTYPE" in
 		nfs4|nfs|aznfs|efs|cifs|smbfs) umount_force="-f" ;;
 		esac
+
+		if $move_before_umount && try_mount_move ; then
+			CANONICALIZED_MOUNTPOINT=$MOVED_CANONICALIZED_MOUNTPOINT \
+			move_before_umount=false \
+			Filesystem_stop
+			return $?
+		fi
 
 		# Umount all sub-filesystems mounted under $MOUNTPOINT/ too.
 		local timeout
@@ -835,6 +985,21 @@ Filesystem_stop()
 #
 Filesystem_status()
 {
+	if $move_before_umount && test -d $MOVED_CANONICALIZED_MOUNTPOINT; then
+		# Have to recurse once.
+		CANONICALIZED_MOUNTPOINT=$MOVED_CANONICALIZED_MOUNTPOINT \
+		move_before_umount=false \
+		OP= \
+		Filesystem_status
+		rc=$?
+		if [ $rc -eq $OCF_SUCCESS ]; then
+			rc=$OCF_ERR_GENERIC
+			msg="move_before_umount=$move_before_umount and something is mounted on $MOVED_CANONICALIZED_MOUNTPOINT"
+			ocf_exit_reason "$msg"
+			return $rc
+		fi
+	fi
+
 	local match_string="${TAB}${CANONICALIZED_MOUNTPOINT}${TAB}"
 	local mounted_device=$(list_mounts | grep "$match_string" | awk '{print $1}')
 
@@ -864,7 +1029,7 @@ Filesystem_status()
 					rc=$OCF_NOT_RUNNING
 				else
 					ocf_exit_reason "Another device ($mounted_device) is already mounted on $MOUNTPOINT"
-					rc=$OCF_ERR_CONFIGURED
+					rc=$OCF_ERR_GENERIC
 				fi
 			fi
 		else
@@ -978,23 +1143,6 @@ Filesystem_monitor()
 #
 Filesystem_validate_all()
 {
-	# Check if the $FSTYPE is workable
-	# NOTE: Without inserting the $FSTYPE module, this step may be imprecise
-	# TODO: This is Linux specific crap.
-	if [ ! -z "$FSTYPE" -a "$FSTYPE" != none ]; then
-		cut -f2 /proc/filesystems | grep "^${FSTYPE}$" >/dev/null 2>&1
-		if [ $? -ne 0 ]; then
-			modpath=/lib/modules/$(uname -r)
-			moddep=$modpath/modules.dep
-			# Do we have $FSTYPE in modules.dep?
-			cut -d' ' -f1 $moddep \
-				| grep "^${modpath}.*${FSTYPE}\.k\?o:$" >/dev/null 2>&1
-			if [ $? -ne 0 ]; then
-				ocf_log info "It seems we do not have $FSTYPE support"
-			fi
-		fi
-	fi
-
 	# If we are supposed to do monitoring with status files, then
 	# we need a utility to write in O_DIRECT mode.
 	if [ $OCF_CHECK_LEVEL -gt 0 ]; then
@@ -1056,10 +1204,6 @@ if [ $# -ne 1 ]; then
 fi
 
 # Check the OCF_RESKEY_ environment variables...
-FORCE_UNMOUNT="yes"
-if [ -n "${OCF_RESKEY_force_unmount}" ]; then
-	FORCE_UNMOUNT=$OCF_RESKEY_force_unmount
-fi
 
 DEVICE="$OCF_RESKEY_device"
 case "$DEVICE" in
@@ -1074,6 +1218,55 @@ if [ ! -z "$OCF_RESKEY_options" ]; then
 	options="-o $OCF_RESKEY_options"
 fi
 FAST_STOP=${OCF_RESKEY_fast_stop:="yes"}
+
+parse_force_unmount_modifiers()
+{
+	# keep previous "kill one by one" behavior as default for now
+	move_before_umount=''
+	do_xargs_kill=''
+	do_ps_f=''
+	force_unmount=''
+
+	local IFS=','
+	local m
+
+	set -- $OCF_RESKEY_force_unmount
+
+	for m ; do
+		case $m in
+		"") : ;; # silently ignore "*,,*" in the original value.
+		move) move_before_umount=true ;;
+		nomove) move_before_umount=false ;;
+		ps) do_ps_f=true ;;
+		nops) do_ps_f=false ;;
+		xargs) do_xargs_kill=true ;;
+		noxargs) do_xargs_kill=false ;;
+		# see ocf_is_true
+		yes|true|1|YES|TRUE|True|ja|on|ON|\
+		safe|\
+		false|no) force_unmount=$m ;;
+		*) ocf_log warn "force_unmount: unknown modifier $m ignored" ;;
+		esac
+	done
+
+	# not mentioned, or explicitly empty? "sane defaults"
+	if [ -z "$move_before_umount$do_xargs_kill$do_ps_f$force_unmount" ]; then
+		FORCE_UNMOUNT=false
+	else
+		FORCE_UNMOUNT=${force_unmount:-yes}
+	fi
+	: move : ${move_before_umount:=false}
+	if $move_before_umount; then
+		: xargs : ${do_xargs_kill:=true}
+		: ps : ${do_ps_f:=false}
+	else
+		: xargs : ${do_xargs_kill:=false}
+		: ps : ${do_ps_f:=true}
+	fi
+}
+
+parse_force_unmount_modifiers
+
 
 OP=$1
 
@@ -1136,6 +1329,9 @@ else
 	fi
 fi
 
+MOVED_CANONICALIZED_MOUNTPOINT=$(echo "$CANONICALIZED_MOUNTPOINT" | sed -e 's,/\([^/]\+\)$,/.\1,')
+
+
 # Check to make sure the utilites are found
 if [ "X${HOSTOS}" != "XOpenBSD" ];then
 check_binary $MODPROBE
@@ -1169,7 +1365,10 @@ is_option "ro" &&
 	CLUSTERSAFE=2
 
 case "$FSTYPE" in
-nfs4|nfs|aznfs|efs|smbfs|cifs|none|gfs2|glusterfs|ceph|ocfs2|overlay|overlayfs|tmpfs|cvfs|lustre)
+none|overlay|overlayfs|tmpfs)
+	CLUSTERSAFE=1 # this is kind of safe too
+	;;
+nfs4|nfs|aznfs|efs|smbfs|cifs|gfs2|glusterfs|ceph|ocfs2|cvfs|lustre)
 	CLUSTERSAFE=1 # this is kind of safe too
 	systemd_drop_in "99-Filesystem-remote" "After" "remote-fs.target"
 	;;

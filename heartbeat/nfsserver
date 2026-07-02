@@ -264,7 +264,7 @@ set_exec_mode()
 	##
 	# If the user defined an init script, It must exist for us to continue
 	##
-	if ! $systemd_is_running && [ -n "$OCF_RESKEY_nfs_init_script" ]; then
+	if [ $systemd_running -ne 0 ] && [ -n "$OCF_RESKEY_nfs_init_script" ]; then
 		# check_binary will exit the process if init script does not exist
 		check_binary ${OCF_RESKEY_nfs_init_script}
 		EXEC_MODE=1
@@ -274,7 +274,7 @@ set_exec_mode()
 	##
 	# Check to see if the default init script exists, if so we'll use that.
 	##
-	if ! $systemd_is_running && which $DEFAULT_INIT_SCRIPT > /dev/null 2>&1; then
+	if [ $systemd_running -ne 0 ] && which $DEFAULT_INIT_SCRIPT > /dev/null 2>&1; then
 		OCF_RESKEY_nfs_init_script=$DEFAULT_INIT_SCRIPT
 		EXEC_MODE=1
 		return 0
@@ -363,17 +363,25 @@ nfsserver_systemd_monitor()
 		rpcinfo > /dev/null 2>&1
 		rc=$?
 		if [ "$rc" -ne "0" ]; then
-			ocf_exit_reason "rpcbind is not running"
+			if ocf_is_probe  || [ "$__OCF_ACTION" = "start" ]; then
+				ocf_log info "rpcbind is not running"
+			else
+				ocf_exit_reason "rpcbind is not running"
+			fi
 			return $OCF_NOT_RUNNING
 		fi
+	fi
 
-		ocf_log debug "Status: nfs-mountd"
-		ps axww | grep -q "[r]pc.mountd"
-		rc=$?
-		if [ "$rc" -ne "0" ]; then
+	ocf_log debug "Status: nfs-mountd"
+	ps axww | grep -q "[r]pc.mountd"
+	rc=$?
+	if [ "$rc" -ne "0" ]; then
+		if ocf_is_probe  || [ "$__OCF_ACTION" = "start" ]; then
+			ocf_log info "nfs-mountd is not running"
+		else
 			ocf_exit_reason "nfs-mountd is not running"
-			return $OCF_NOT_RUNNING
 		fi
+		return $OCF_NOT_RUNNING
 	fi
 
 	ocf_log debug "Status: nfs-idmapd"
@@ -383,7 +391,11 @@ nfsserver_systemd_monitor()
 	ocf_log debug "$(cat $fn)"
 	rm -f $fn
 	if [ "$rc" -ne "0" ]; then
-		ocf_exit_reason "nfs-idmapd is not running"
+		if ocf_is_probe  || [ "$__OCF_ACTION" = "start" ]; then
+			ocf_log info "nfs-idmapd is not running"
+		else
+			ocf_exit_reason "nfs-idmapd is not running"
+		fi
 		return $OCF_NOT_RUNNING
 	fi
 
@@ -392,9 +404,53 @@ nfsserver_systemd_monitor()
 		rpcinfo -t localhost 100024 > /dev/null 2>&1
 		rc=$?
 		if [ "$rc" -ne "0" ]; then
-			ocf_exit_reason "rpc-statd is not running"
+			if ocf_is_probe  || [ "$__OCF_ACTION" = "start" ]; then
+				ocf_log info "rpc-statd is not running"
+			else
+				ocf_exit_reason "rpc-statd is not running"
+			fi
 			return $OCF_NOT_RUNNING
 		fi
+	fi
+
+	local nfsdcld_unit_status
+	nfsdcld_unit_status=$(systemctl --no-legend list-unit-files "nfsdcld.service" 2>/dev/null)
+
+	if echo "$nfsdcld_unit_status" | grep -qE "nfsdcld.*masked"; then
+		ocf_log debug "Status: nfsdcld (masked, skipping monitor)"
+	elif echo "$nfsdcld_unit_status" | grep -q nfsdcld; then
+		local nfsdcld_state
+		nfsdcld_state=$(systemctl show -p ActiveState --value nfsdcld.service 2>/dev/null)
+
+		ocf_log debug "Status: nfsdcld (state: $nfsdcld_state)"
+
+		case "$nfsdcld_state" in
+			active)
+				ocf_log debug "Status: nfsdcld (monitoring as it is active)"
+				fn=`mktemp`
+				nfs_exec status nfsdcld > $fn 2>&1
+				rc=$?
+				ocf_log debug "$(cat $fn)"
+				rm -f $fn
+				if [ "$rc" -ne "0" ]; then
+					if ocf_is_probe || [ "$__OCF_ACTION" = "start" ]; then
+						ocf_log info "nfsdcld service is not running"
+					else
+						ocf_exit_reason "nfsdcld service is not running"
+					fi
+					return $OCF_NOT_RUNNING
+				fi
+				;;
+
+			failed|inactive|deactivating)
+				if ocf_is_probe || [ "$__OCF_ACTION" = "start" ]; then
+					ocf_log info "nfsdcld service is not running"
+				else
+					ocf_exit_reason "nfsdcld service is in '$nfsdcld_state' state"
+				fi
+				return $OCF_NOT_RUNNING
+				;;
+		esac
 	fi
 
 	nfs_exec is-active nfs-server
@@ -410,7 +466,8 @@ nfsserver_systemd_monitor()
 			if [ $threads_num -gt 0 ]; then
 				return $OCF_SUCCESS
 			else
-				return 3
+				ocf_exit_reason "nfsd is not running"
+				return $OCF_ERR_UNIMPLEMENTED
 			fi
 		else
 			return $OCF_ERR_GENERIC
@@ -466,14 +523,14 @@ prepare_directory ()
 	[ -d "$fp/$STATD_DIR/sm.ha" ] || mkdir -p "$fp/$STATD_DIR/sm.ha"
 	[ -d "$fp/$STATD_DIR/sm.bak" ] || mkdir -p "$fp/$STATD_DIR/sm.bak"
 	[ -n "`id -u rpcuser 2>/dev/null`" -a "`id -g rpcuser 2>/dev/null`" ] &&
-		chown -R rpcuser.rpcuser "$fp/$STATD_DIR"
+		chown -R rpcuser:rpcuser "$fp/$STATD_DIR"
 
 	[ -f "$fp/etab" ] || touch "$fp/etab"
 	[ -f "$fp/xtab" ] || touch "$fp/xtab"
 	[ -f "$fp/rmtab" ] || touch "$fp/rmtab"
 
 	dd if=/dev/urandom of=$fp/$STATD_DIR/state bs=1 count=4 >/dev/null 2>&1
-	[ -n "`id -u rpcuser 2>/dev/null`" -a "`id -g rpcuser 2>/dev/null`" ] && chown rpcuser.rpcuser "$fp/$STATD_DIR/state"
+	[ -n "`id -u rpcuser 2>/dev/null`" -a "`id -g rpcuser 2>/dev/null`" ] && chown rpcuser:rpcuser "$fp/$STATD_DIR/state"
 	[ $SELINUX_ENABLED -eq 0 ] && chcon -R "$SELINUX_LABEL" "$fp"
 }
 
@@ -780,7 +837,7 @@ nfsserver_start ()
 	# the uts namespace is useless in that case.
 	# If systemd is running, mangle the nfs-server.service unit,
 	# independent of the "EXEC_MODE" we detected.
-	if $systemd_is_running ; then
+	if [ $systemd_running -eq 0 ]; then
 		if [ -z "$OCF_RESKEY_nfs_server_scope" ] ; then
 			remove_unshare_uts_dropins
 		else
@@ -789,7 +846,9 @@ nfsserver_start ()
 	fi
 
 	if ! `mount | grep -q " on $OCF_RESKEY_rpcpipefs_dir "`; then
-		mount -t rpc_pipefs sunrpc $OCF_RESKEY_rpcpipefs_dir
+		if [ $systemd_running -ne 0 ] || { [ $systemd_running -eq 0 ] && systemctl -q is-enabled var-lib-nfs-rpc_pipefs.mount ;}; then
+			mount -t rpc_pipefs sunrpc $OCF_RESKEY_rpcpipefs_dir
+		fi
 	fi
 
 	# remove the sm-notify pid so sm-notify will be allowed to run again without requiring a reboot.
@@ -992,6 +1051,20 @@ nfsserver_stop ()
 		  		return $OCF_ERR_GENERIC
 		  	fi
 		  fi
+
+		  if systemctl --no-legend list-unit-files "fsidd.service" | grep -q fsidd.service; then
+		  	nfs_exec stop fsidd > /dev/null 2>&1
+		  	ocf_log info "Stop: fsidd"
+		  	fn=`mktemp`
+		  	nfs_exec status fsidd > $fn 2>&1
+		  	rc=$?
+		  	ocf_log debug "$(cat $fn)"
+		  	rm -f $fn
+		  	if [ "$rc" -eq "0" ]; then
+		  		ocf_exit_reason "Failed to stop fsidd"
+		  		return $OCF_ERR_GENERIC
+		  	fi
+		  fi
 	esac
 
 
@@ -1003,11 +1076,15 @@ nfsserver_stop ()
 		fi
 	fi
 
-	# systemd
-	case $EXEC_MODE in
-            [23]) nfs_exec stop rpc-gssd > /dev/null 2>&1
-		  ocf_log info "Stop: rpc-gssd"
-	esac
+
+	if mount | grep -q " on $OCF_RESKEY_rpcpipefs_dir "; then
+		# systemd
+		case $EXEC_MODE in
+			[23])
+				nfs_exec stop rpc-gssd > /dev/null 2>&1
+				ocf_log info "Stop: rpc-gssd"
+		esac
+	fi
 
 	unbind_tree
 	rc=$?
@@ -1017,7 +1094,7 @@ nfsserver_stop ()
 		ocf_log info "NFS server stopped"
 	fi
 
-	if $systemd_is_running; then
+	if [ $systemd_running -eq 0 ]; then
 		remove_unshare_uts_dropins
 	fi
 
@@ -1056,8 +1133,8 @@ nfsserver_validate ()
 	return $OCF_SUCCESS
 }
 
+systemd_is_running; systemd_running=$?
 nfsserver_validate
-systemd_is_running && systemd_is_running=true || systemd_is_running=false
 
 case $__OCF_ACTION in
 	start)      nfsserver_start

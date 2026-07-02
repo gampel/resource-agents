@@ -115,6 +115,7 @@ ocf_SCRIPTS	      = AoEtarget		\
 			exportfs		\
 			fio			\
 			galera			\
+			ganesha-nfs		\
 			garbd			\
 			gcp-ilb			\
 			gcp-vpc-move-ip		\
@@ -167,7 +168,6 @@ ocf_SCRIPTS	      = AoEtarget		\
 			rabbitmq-cluster	\
 			rabbitmq-server-ha	\
 			redis			\
-			rkt			\
 			rsyncd			\
 			rsyslog			\
 			scsi2reservation	\
@@ -195,6 +195,10 @@ if BUILD_AZURE_EVENTS_AZ
 ocf_SCRIPTS	     += azure-events-az
 endif
 
+if BUILD_AZURE_SAP_ZONE
+ocf_SCRIPTS	     += azure-sap-zone
+endif
+
 if BUILD_GCP_PD_MOVE
 ocf_SCRIPTS	     += gcp-pd-move
 endif
@@ -205,6 +209,10 @@ endif
 
 if BUILD_GCP_VPC_MOVE_VIP
 ocf_SCRIPTS	     += gcp-vpc-move-vip
+endif
+
+if BUILD_POWERVS_MOVE_IP
+ocf_SCRIPTS	     += powervs-move-ip
 endif
 
 if BUILD_POWERVS_SUBNET
