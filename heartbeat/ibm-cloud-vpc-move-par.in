@@ -53,7 +53,7 @@ def os_ip(ip):
 
     command = ["ip", "a"]
     response = subprocess.run(command, capture_output=True, text=True)
-    return ip in  response.stdout
+    return ip in response.stdout
 
 def ip_address_validator(ip):
     """validate ip address string
@@ -161,7 +161,7 @@ def start_action(
         )
         ocf.logger.info(f"start_action: public address range result: {result}")
     except Exception as e:
-        ocf.logger.error('Couldn\'t connect with IBM Cloud api: ' + str(e))
+        ocf.logger.error("Couldn't connect with IBM Cloud api: " + str(e))
         sys.exit(ocf.OCF_ERR_GENERIC)
 
     return ocf.OCF_SUCCESS
@@ -207,16 +207,16 @@ def monitor_action(
                 api_key=api_key
             )
             if zones_match:
-                ocf.logger.info(f"Public address range is in the correct zone: {current_zone}")
+                ocf.logger.debug(f"Public address range is in the correct zone: {current_zone}")
                 return ocf.OCF_SUCCESS
             ocf.logger.warning(f"Public address range is in different zone: {current_zone}")
             return ocf.OCF_NOT_RUNNING
         except Exception as e:
-            ocf.logger.error('Couldn\'t check public address range zone compatibility: ' + str(e))
+            ocf.logger.error("Couldn't check public address range zone compatibility: " + str(e))
             return ocf.OCF_NOT_RUNNING
 
     except Exception as e:
-        ocf.logger.error('Couldn\'t connect with IBM Cloud api: ' + str(e))
+        ocf.logger.error("Couldn't connect with IBM Cloud api: " + str(e))
         sys.exit(ocf.OCF_ERR_GENERIC)
 
 def main():
@@ -258,16 +258,16 @@ def main():
 
     agent.add_parameter(
         "nexthop_ip_1",
-        shortdesc="Ip address for first instance.",
-        longdesc="predefined private ip address for first instance to be used as nexthop.",
+        shortdesc="IP address for first instance.",
+        longdesc="predefined private IP address for first instance to be used as nexthop.",
         content_type="string",
         required=True,
     )
 
     agent.add_parameter(
         "nexthop_ip_2",
-        shortdesc="Ip address for second instance.",
-        longdesc="predefined private ip address for second instance to be used as nexthop.",
+        shortdesc="IP address for second instance.",
+        longdesc="predefined private IP address for second instance to be used as nexthop.",
         content_type="string",
         required=True,
     )
